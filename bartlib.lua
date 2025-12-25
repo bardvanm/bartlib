@@ -38,23 +38,25 @@ end
 
 local function makeDraggable(frame, dragHandle)
     dragHandle = dragHandle or frame
-    local dragging, dragInput, dragStart, startPos
+    local dragging = false
+    local dragStartPos
+    local startPos
 
-    local function update(input)
-        local delta = input.Position - dragStart
-        frame.Position = UDim2.new(
-            math.clamp(startPos.X.Scale + (delta.X / frame.Parent.AbsoluteSize.X), 0, 1 - frame.Size.X.Scale),
-            startPos.X.Offset + delta.X,
-            math.clamp(startPos.Y.Scale + (delta.Y / frame.Parent.AbsoluteSize.Y), 0, 1 - frame.Size.Y.Scale),
-            startPos.Y.Offset + delta.Y
-        )
+    local function onInputChanged(input)
+        if not dragging or input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+        local delta = input.Position - dragStartPos
+        local parentSize = frame.Parent.AbsoluteSize
+        local frameSize = frame.AbsoluteSize
+        local newX = math.clamp(startPos.X + delta.X, 0, parentSize.X - frameSize.X)
+        local newY = math.clamp(startPos.Y + delta.Y, 0, parentSize.Y - frameSize.Y)
+        frame.Position = UDim2.new(0, newX, 0, newY)
     end
 
     dragHandle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
-            dragStart = input.Position
-            startPos = frame.Position
+            dragStartPos = input.Position
+            startPos = frame.AbsolutePosition
             input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
                     dragging = false
@@ -65,13 +67,7 @@ local function makeDraggable(frame, dragHandle)
 
     dragHandle.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement then
-            dragInput = input
-        end
-    end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            update(input)
+            UserInputService.InputChanged:Connect(onInputChanged)
         end
     end)
 end
@@ -113,6 +109,7 @@ function Library:CreateWindow(title)
         BackgroundColor3 = theme.Background,
         BorderSizePixel = 0,
         Active = true,
+        ClipsDescendants = true, -- ensure content doesn't overflow when minimized
     })
     -- rounded corners
     local windowCorner = new("UICorner", { Parent = window, CornerRadius = UDim.new(0, 8) })
@@ -125,6 +122,7 @@ function Library:CreateWindow(title)
         BorderSizePixel = 0,
         ZIndex = 0,
     })
+    new("UICorner", { Parent = outline, CornerRadius = UDim.new(0, 8) }) -- round outline too
 
     local header = new("Frame", {
         Name = "Header",
@@ -171,12 +169,18 @@ function Library:CreateWindow(title)
         if not minimized then
             minimized = true
             closeBtn.Text = "+"
-            -- hide content and animate to header-only size
-            TweenService:Create(window, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(0, window.Size.X.Offset, 0, HEADER_HEIGHT)}):Play()
+            content.Visible = false
+            -- animate to header-only height using current absolute width
+            TweenService:Create(window, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                Size = UDim2.new(0, window.AbsoluteSize.X, 0, HEADER_HEIGHT)
+            }):Play()
         else
             minimized = false
             closeBtn.Text = "—"
-            TweenService:Create(window, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = normalSize}):Play()
+            content.Visible = true
+            TweenService:Create(window, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                Size = normalSize
+            }):Play()
         end
     end)
 
