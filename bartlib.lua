@@ -1,9 +1,9 @@
 -- Minimal, dependency-free Roblox GUI library (BartLib)
 
 -- Usage:
--- local library = loadstring(game:HttpGet('<raw link to this file>'))()
--- local w = library:CreateWindow("barts Legacy")
--- local farming = w:CreateFolder("Farming")
+-- local library = loadstring(game:HttpGet('https://raw.githubusercontent.com/bardvanm/bartlib/main/bartlib.lua'))()
+-- local w = library:CreateWindow("name")
+-- local farming = w:CreateFolder("name of folder inside of name")
 -- farming:Toggle("autoClick", function(v) getgenv().autoClick = v if v then autoClick() end end)
 
 local Players = game:GetService("Players")
@@ -15,13 +15,13 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local theme = {
-    Background = Color3.fromRGB(30, 30, 30),
-    WindowAccent = Color3.fromRGB(10, 132, 255),
-    FolderHeader = Color3.fromRGB(45, 45, 45),
-    Text = Color3.fromRGB(230, 230, 230),
-    Subtext = Color3.fromRGB(180, 180, 180),
-    Outline = Color3.fromRGB(20, 20, 20),
-    Checked = Color3.fromRGB(102, 204, 102),
+    Background = Color3.fromRGB(18, 18, 24),        -- darker background (IDE-like)
+    WindowAccent = Color3.fromRGB(189, 104, 255),   -- purple/pink accent
+    FolderHeader = Color3.fromRGB(28, 28, 34),      -- slightly lighter than background
+    Text = Color3.fromRGB(230, 230, 235),           -- bright text
+    Subtext = Color3.fromRGB(160, 160, 175),        -- muted subtext
+    Outline = Color3.fromRGB(12, 12, 15),
+    Checked = Color3.fromRGB(75, 209, 239),         -- cyan for checked
 }
 
 local function new(class, props)
@@ -101,16 +101,21 @@ end
 function Library:CreateWindow(title)
     local screen = self._screenGui
 
+    -- Make window smaller so multiple windows fit
+    local INITIAL_SIZE = UDim2.new(0, 320, 0, 300)
+    local HEADER_HEIGHT = 32
+
     local window = new("Frame", {
         Name = "Window",
         Parent = screen,
-        Size = UDim2.new(0, 380, 0, 420),
-        Position = UDim2.new(0.5, -190, 0.5, -210),
+        Size = INITIAL_SIZE,
+        Position = UDim2.new(0.5, -160, 0.5, -150),
         BackgroundColor3 = theme.Background,
         BorderSizePixel = 0,
         Active = true,
     })
-
+    -- rounded corners
+    local windowCorner = new("UICorner", { Parent = window, CornerRadius = UDim.new(0, 8) })
     local outline = new("Frame", {
         Name = "Outline",
         Parent = window,
@@ -124,15 +129,17 @@ function Library:CreateWindow(title)
     local header = new("Frame", {
         Name = "Header",
         Parent = window,
-        Size = UDim2.new(1, 0, 0, 30),
+        Size = UDim2.new(1, 0, 0, HEADER_HEIGHT),
         BackgroundColor3 = theme.WindowAccent,
         BorderSizePixel = 0,
+        ZIndex = 2,
     })
+    local headerCorner = new("UICorner", { Parent = header, CornerRadius = UDim.new(0, 8) })
     local titleLabel = new("TextLabel", {
         Name = "Title",
         Parent = header,
-        Size = UDim2.new(1, -36, 1, 0),
-        Position = UDim2.new(0, 8, 0, 0),
+        Size = UDim2.new(1, -40, 1, 0),
+        Position = UDim2.new(0, 10, 0, 0),
         BackgroundTransparency = 1,
         Text = tostring(title or "Window"),
         TextColor3 = theme.Text,
@@ -140,20 +147,37 @@ function Library:CreateWindow(title)
         TextSize = 14,
         TextXAlignment = Enum.TextXAlignment.Left,
     })
+    -- minimize button (header-only toggle)
     local closeBtn = new("TextButton", {
-        Name = "Close",
+        Name = "Minimize",
         Parent = header,
-        Size = UDim2.new(0, 28, 0, 18),
-        Position = UDim2.new(1, -34, 0.5, -9),
-        BackgroundColor3 = Color3.fromRGB(200, 60, 60),
-        Text = "X",
-        TextColor3 = Color3.new(1, 1, 1),
+        Size = UDim2.new(0, 28, 0, 20),
+        Position = UDim2.new(1, -36, 0.5, -10),
+        BackgroundTransparency = 0,
+        BackgroundColor3 = Color3.fromRGB(35, 20, 40),
+        Text = "—",
+        TextColor3 = theme.Text,
         Font = Enum.Font.GothamBold,
-        TextSize = 12,
+        TextSize = 16,
         AutoButtonColor = false,
+        ZIndex = 3,
     })
+    new("UICorner", { Parent = closeBtn, CornerRadius = UDim.new(0, 6) })
+
+    -- toggle minimize/restore with tween
+    local minimized = false
+    local normalSize = window.Size
     closeBtn.MouseButton1Click:Connect(function()
-        window.Visible = not window.Visible
+        if not minimized then
+            minimized = true
+            closeBtn.Text = "+"
+            -- hide content and animate to header-only size
+            TweenService:Create(window, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(0, window.Size.X.Offset, 0, HEADER_HEIGHT)}):Play()
+        else
+            minimized = false
+            closeBtn.Text = "—"
+            TweenService:Create(window, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = normalSize}):Play()
+        end
     end)
 
     makeDraggable(window, header)
@@ -161,8 +185,8 @@ function Library:CreateWindow(title)
     local content = new("Frame", {
         Name = "Content",
         Parent = window,
-        Size = UDim2.new(1, 0, 1, -30),
-        Position = UDim2.new(0, 0, 0, 30),
+        Size = UDim2.new(1, 0, 1, -HEADER_HEIGHT),
+        Position = UDim2.new(0, 0, 0, HEADER_HEIGHT),
         BackgroundTransparency = 1,
     })
     local folderList = new("ScrollingFrame", {
@@ -202,6 +226,8 @@ function Library:CreateWindow(title)
             BackgroundColor3 = theme.FolderHeader,
             BorderSizePixel = 0,
         })
+        -- folder rounded
+        new("UICorner", { Parent = folderFrame, CornerRadius = UDim.new(0, 6) })
         local header = new("Frame", {
             Name = "FolderHeader",
             Parent = folderFrame,
@@ -306,10 +332,11 @@ function Library:CreateWindow(title)
                 Parent = item,
                 Size = UDim2.new(0, 20, 0, 20),
                 Position = UDim2.new(1, -28, 0.5, -10),
-                BackgroundColor3 = Color3.fromRGB(60, 60, 60),
+                BackgroundColor3 = Color3.fromRGB(40, 40, 46),
                 BorderSizePixel = 0,
                 AnchorPoint = Vector2.new(0, 0),
             })
+            new("UICorner", { Parent = box, CornerRadius = UDim.new(0, 4) })
             local tick = new("Frame", {
                 Name = "Tick",
                 Parent = box,
@@ -319,6 +346,7 @@ function Library:CreateWindow(title)
                 Visible = false,
                 BorderSizePixel = 0,
             })
+            new("UICorner", { Parent = tick, CornerRadius = UDim.new(0, 3) })
             local btn = new("TextButton", {
                 Name = "Btn",
                 Parent = item,
