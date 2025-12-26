@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -25,31 +26,44 @@ local function new(class, props)
     return inst
 end
 
+-- Smooth, reliable dragging using global input + RenderStepped and a deadzone
 local function makeDraggable(frame, handle)
     handle = handle or frame
     handle.Active = true
-    local dragging, dragInput, dragStart, startPos
+    local dragging, dragStart, startPos, startedMoving, clickOffset
+    local renderConn
+
+    -- start drag when clicking the handle (works reliably for header + its children)
     handle.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position
-            startPos = frame.AbsolutePosition
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
-            end)
-        end
-    end)
-    handle.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end
-    end)
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and input == dragInput then
-            local delta = input.Position - dragStart
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        dragging = true
+        startedMoving = false
+        -- capture exact mouse and frame positions and the click offset
+        dragStart = UserInputService:GetMouseLocation()
+        startPos = Vector2.new(frame.AbsolutePosition.X, frame.AbsolutePosition.Y)
+        clickOffset = dragStart - startPos
+
+        renderConn = RunService.RenderStepped:Connect(function()
+            if not dragging then return end
+            local m = UserInputService:GetMouseLocation()
+            local newPos = m - clickOffset
+            local delta = newPos - startPos
+            if not startedMoving then
+                if math.abs(delta.X) + math.abs(delta.Y) < 6 then return end
+                startedMoving = true
+            end
             local parentSize = frame.Parent.AbsoluteSize
             local frameSize = frame.AbsoluteSize
-            local newX = math.clamp(startPos.X + delta.X, 0, parentSize.X - frameSize.X)
-            local newY = math.clamp(startPos.Y + delta.Y, 0, parentSize.Y - frameSize.Y)
+            local newX = math.clamp(newPos.X, 0, parentSize.X - frameSize.X)
+            local newY = math.clamp(newPos.Y, 0, parentSize.Y - frameSize.Y)
             frame.Position = UDim2.new(0, newX, 0, newY)
+        end)
+    end)
+
+    handle.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+            if renderConn then renderConn:Disconnect(); renderConn = nil end
         end
     end)
 end
@@ -68,6 +82,7 @@ function BartLib:CreateWindow(title)
     local HEADER_H = 34
     local TAB_H = 36
     local MAX_H = 360
+    local CONTENT_PADDING = 24
 
     local win = new("Frame", {
         Parent = SCREEN,
@@ -90,7 +105,7 @@ function BartLib:CreateWindow(title)
 
     local tabBar = new("Frame", { Parent = win, Name = "TabBar", Position = UDim2.new(0,0,0,HEADER_H), Size = UDim2.new(1,0,0,TAB_H), BackgroundColor3 = theme.Tab, BorderSizePixel = 0, ClipsDescendants = false })
     new("UICorner", { Parent = tabBar, CornerRadius = UDim.new(0,6) })
-    local tabLayout = new("UIListLayout", { Parent = tabBar, FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Left, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0,8), SortOrder = Enum.SortOrder.LayoutOrder })
+    new("UIListLayout", { Parent = tabBar, FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Left, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0,8), SortOrder = Enum.SortOrder.LayoutOrder })
     new("UIPadding", { Parent = tabBar, PaddingLeft = UDim.new(0,8), PaddingRight = UDim.new(0,8) })
 
     local content = new("Frame", { Parent = win, Position = UDim2.new(0,0,0, HEADER_H + TAB_H), Size = UDim2.new(1,0,0,0), BackgroundColor3 = theme.Panel, BorderSizePixel = 0 })
@@ -111,13 +126,27 @@ function BartLib:CreateWindow(title)
             miniBtn.Text = "—"
             tabBar.Visible = true
             content.Visible = true
-            local maxContent = 0
-            for _,f in ipairs(self._folders) do
-                local h = (f._uiList and f._uiList.AbsoluteContentSize.Y) or f.ElementsFrame.AbsoluteSize.Y
-                maxContent = math.max(maxContent, h)
-            end
-            local desired = math.clamp(HEADER_H + TAB_H + maxContent + 16, HEADER_H + TAB_H + 80, MAX_H)
-            win:TweenSize(UDim2.new(0, WIDTH, 0, desired), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.15, true)
+            -- prefer sizing to the currently selected folder (if any)
+            local selected
+            for _,f in ipairs(self._folders) do if f.ElementsFrame.Visible then selected = f; break end end
+
+            -- wait one frame so UIListLayout updates sizes then compute the target size
+            task.defer(function()
+                RunService.Heartbeat:Wait()
+                local targetHeight = 0
+                if selected then
+                    local h = (selected._uiList and selected._uiList.AbsoluteContentSize.Y) or selected.ElementsFrame.AbsoluteSize.Y
+                    targetHeight = math.clamp(HEADER_H + TAB_H + h + CONTENT_PADDING, HEADER_H + TAB_H + 80, MAX_H)
+                else
+                    local maxContent = 0
+                    for _,f in ipairs(self._folders) do
+                        local h = (f._uiList and f._uiList.AbsoluteContentSize.Y) or f.ElementsFrame.AbsoluteSize.Y
+                        maxContent = math.max(maxContent, h)
+                    end
+                    targetHeight = math.clamp(HEADER_H + TAB_H + maxContent + CONTENT_PADDING, HEADER_H + TAB_H + 80, MAX_H)
+                end
+                win:TweenSize(UDim2.new(0, WIDTH, 0, targetHeight), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.15, true)
+            end)
         end
     end
     miniBtn.MouseButton1Click:Connect(function() setMinimized(not self._minimized) end)
@@ -129,9 +158,18 @@ function BartLib:CreateWindow(title)
             f.Tab.Button.BackgroundColor3 = (f == folder) and theme.Accent or theme.Tab
         end
         if self._minimized then setMinimized(false) end
-        local listY = (folder._uiList and folder._uiList.AbsoluteContentSize.Y) or folder.ElementsFrame.AbsoluteSize.Y
-        local contentH = math.min(MAX_H - (HEADER_H + TAB_H), listY)
-        local desired = HEADER_H + TAB_H + math.max(60, contentH) + 16
+
+        local function measure()
+            local listY = (folder._uiList and folder._uiList.AbsoluteContentSize.Y) or folder.ElementsFrame.AbsoluteSize.Y
+            if listY == 0 and #folder.Elements > 0 then
+                RunService.Heartbeat:Wait()
+                listY = (folder._uiList and folder._uiList.AbsoluteContentSize.Y) or folder.ElementsFrame.AbsoluteSize.Y
+            end
+            return math.min(MAX_H - (HEADER_H + TAB_H), listY)
+        end
+
+        local contentH = measure()
+        local desired = HEADER_H + TAB_H + math.max(60, contentH) + CONTENT_PADDING
         win:TweenSize(UDim2.new(0, WIDTH, 0, desired), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.15, true)
     end
 
@@ -179,6 +217,7 @@ function BartLib:CreateWindow(title)
             local min = opts and opts.min or 0
             local max = opts and opts.max or 100
             local precise = opts and opts.precise
+            local step = (opts and opts.step) or (precise and 0.01) or 1
             local f = new("Frame", { Parent = elems, Size = UDim2.new(1,0,0,36), BackgroundTransparency = 1 })
             new("TextLabel", { Parent = f, Size = UDim2.new(0.55,0,0,18), Position = UDim2.new(0,8,0,4), BackgroundTransparency = 1, Text = label, TextColor3 = theme.Sub, Font = Enum.Font.SourceSans, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left })
             local valLbl = new("TextLabel", { Parent = f, Size = UDim2.new(0.3,0,0,18), Position = UDim2.new(1,-120,0,4), BackgroundTransparency = 1, Text = tostring(min), TextColor3 = theme.Text, Font = Enum.Font.SourceSans, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Right })
@@ -188,13 +227,26 @@ function BartLib:CreateWindow(title)
             new("UICorner", { Parent = fill, CornerRadius = UDim.new(0,4) })
             local dragging = false
             local value = min
+            local function formatValue(v)
+                if step < 1 then
+                    return string.format("%.2f", v)
+                else
+                    return tostring(math.floor(v + 0.5))
+                end
+            end
             local function setFromX(x)
                 local rel = math.clamp((x - track.AbsolutePosition.X)/track.AbsoluteSize.X, 0, 1)
-                value = (min + (max-min)*rel)
-                if not precise then value = math.floor(value + 0.5) end
-                fill.Size = UDim2.new(rel,0,1,0)
-                valLbl.Text = tostring(value)
+                local raw = (min + (max-min)*rel)
+                value = math.floor(raw/step + 0.5) * step
+                fill.Size = UDim2.new(math.clamp((value - min)/(max - min), 0, 1),0,1,0)
+                valLbl.Text = formatValue(value)
                 if cb then pcall(cb, value) end
+            end
+            -- initialize visuals to min/default
+            do
+                local initRel = (value - min) / math.max(1, (max - min))
+                fill.Size = UDim2.new(math.clamp(initRel, 0, 1), 0, 1, 0)
+                valLbl.Text = formatValue(value)
             end
             track.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true; setFromX(i.Position.X) end end)
             track.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end end)
@@ -216,6 +268,8 @@ function BartLib:CreateWindow(title)
             main.MouseButton1Click:Connect(function()
                 list.Visible = not list.Visible
                 if list.Visible and self._minimized then setMinimized(false) end
+                -- always re-measure after toggle (open or close) so window expands/shrinks
+                task.defer(function() RunService.Heartbeat:Wait(); selectFolder(folder) end)
             end)
             for _,opt in ipairs(options or {}) do
                 local o = new("TextButton", { Parent = list, Size = UDim2.new(1,0,0,26), BackgroundColor3 = theme.Button, Text = opt, TextColor3 = theme.Text, AutoButtonColor = false })
@@ -226,6 +280,8 @@ function BartLib:CreateWindow(title)
                     main.Text = tostring(opt)
                     list.Visible = false
                     if cb then pcall(cb, opt) end
+                    -- ensure window resizes to reflect the closed list
+                    task.defer(function() RunService.Heartbeat:Wait(); selectFolder(folder) end)
                 end)
             end
             table.insert(folder.Elements, { Type = "Dropdown", Frame = container })
@@ -272,7 +328,7 @@ function BartLib:CreateWindow(title)
         folder.Bind = function(_, ...) return AddBind(...) end
         folder.Box = function(_, ...) return AddBox(...) end
         folder.Open = function() selectFolder(folder) end
-        folder.Close = function() elems.Visible = false end
+        folder.Close = function() elems.Visible = false; task.defer(function() RunService.Heartbeat:Wait(); selectFolder(folder) end) end
 
         table.insert(self._folders, folder)
         if #self._folders == 1 then selectFolder(folder) end
@@ -285,6 +341,6 @@ function BartLib:CreateWindow(title)
     return setmetatable(self, { __index = BartLib })
 end
 
--- return the library (also make it callable for backwards compatibility)
+-- return the library (also callable for compatibility)
 setmetatable(BartLib, { __call = function() return BartLib end })
 return BartLib
