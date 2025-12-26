@@ -94,7 +94,7 @@ function BartLib:CreateWindow(title)
     new("UIPadding", { Parent = tabBar, PaddingLeft = UDim.new(0,8), PaddingRight = UDim.new(0,8) })
 
     local content = new("Frame", { Parent = win, Position = UDim2.new(0,0,0, HEADER_H + TAB_H), Size = UDim2.new(1,0,0,0), BackgroundColor3 = theme.Panel, BorderSizePixel = 0 })
-    local contentLayout = new("UIListLayout", { Parent = content, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0,6) })
+    new("UIListLayout", { Parent = content, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0,6) })
     new("UIPadding", { Parent = content, PaddingLeft = UDim.new(0,8), PaddingTop = UDim.new(0,8), PaddingRight = UDim.new(0,8) })
 
     makeDraggable(win, header)
@@ -147,7 +147,6 @@ function BartLib:CreateWindow(title)
         local elems = new("Frame", { Parent = content, Size = UDim2.new(1,0,0,0), BackgroundTransparency = 1, Visible = false, LayoutOrder = idx })
         local uiList = new("UIListLayout", { Parent = elems, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0,6) })
         new("UIPadding", { Parent = elems, PaddingLeft = UDim.new(0,6), PaddingTop = UDim.new(0,6), PaddingBottom = UDim.new(0,6) })
-        -- can't attach arbitrary fields to Instances; keep layout ref on the Lua folder table
         folder._uiList = uiList
         uiList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() elems.Size = UDim2.new(1,0,0, uiList.AbsoluteContentSize.Y) end)
 
@@ -283,8 +282,9 @@ function BartLib:CreateWindow(title)
     function self:ToggleUI() setMinimized(not self._minimized) end
     function self:DestroyGui() if SCREEN then SCREEN:Destroy() end end
 
-    return setmetatable(self, { __index = bartlibb })
+    return setmetatable(self, { __index = BartLib })
 end
 
-return setmetatable({}, { __call = function() return bartlibb end })
-
+-- return the library (also make it callable for backwards compatibility)
+setmetatable(BartLib, { __call = function() return BartLib end })
+return BartLib
