@@ -1,407 +1,290 @@
--- Minimal, dependency-free Roblox GUI library (BartLib)
-
--- Usage:
--- local library = loadstring(game:HttpGet('https://raw.githubusercontent.com/bardvanm/bartlib/main/bartlib.lua'))()
--- local w = library:CreateWindow("name")
--- local farming = w:CreateFolder("name of folder inside of name")
--- farming:Toggle("autoClick", function(v) getgenv().autoClick = v if v then autoClick() end end)
-
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local theme = {
-    Background = Color3.fromRGB(18, 18, 24),        -- darker background (IDE-like)
-    WindowAccent = Color3.fromRGB(189, 104, 255),   -- purple/pink accent
-    FolderHeader = Color3.fromRGB(28, 28, 34),      -- slightly lighter than background
-    Text = Color3.fromRGB(230, 230, 235),           -- bright text
-    Subtext = Color3.fromRGB(160, 160, 175),        -- muted subtext
-    Outline = Color3.fromRGB(12, 12, 15),
-    Checked = Color3.fromRGB(75, 209, 239),         -- cyan for checked
+    Bg = Color3.fromRGB(20,20,22),
+    Accent = Color3.fromRGB(45,45,48),
+    Tab = Color3.fromRGB(36,36,39),
+    Panel = Color3.fromRGB(30,30,32),
+    Text = Color3.fromRGB(235,235,235),
+    Sub = Color3.fromRGB(170,170,170),
+    Checked = Color3.fromRGB(75,209,239),
+    Button = Color3.fromRGB(60,60,60),
+    Slider = Color3.fromRGB(75,209,239),
+    Outline = Color3.fromRGB(10,10,10),
 }
 
 local function new(class, props)
     local inst = Instance.new(class)
-    for k, v in pairs(props or {}) do
-        if k == "Parent" then
-            inst.Parent = v
-        else
-            inst[k] = v
-        end
+    for k,v in pairs(props or {}) do
+        if k == "Parent" then inst.Parent = v else inst[k] = v end
     end
     return inst
 end
 
-local function makeDraggable(frame, dragHandle)
-    dragHandle = dragHandle or frame
-    local dragging = false
-    local dragStartPos
-    local startPos
-
-    local function onInputChanged(input)
-        if not dragging or input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
-        local delta = input.Position - dragStartPos
-        local parentSize = frame.Parent.AbsoluteSize
-        local frameSize = frame.AbsoluteSize
-        local newX = math.clamp(startPos.X + delta.X, 0, parentSize.X - frameSize.X)
-        local newY = math.clamp(startPos.Y + delta.Y, 0, parentSize.Y - frameSize.Y)
-        frame.Position = UDim2.new(0, newX, 0, newY)
-    end
-
-    dragHandle.InputBegan:Connect(function(input)
+local function makeDraggable(frame, handle)
+    handle = handle or frame
+    handle.Active = true
+    local dragging, dragInput, dragStart, startPos
+    handle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
-            dragStartPos = input.Position
+            dragStart = input.Position
             startPos = frame.AbsolutePosition
             input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
             end)
         end
     end)
-
-    dragHandle.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then
-            UserInputService.InputChanged:Connect(onInputChanged)
+    handle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input == dragInput then
+            local delta = input.Position - dragStart
+            local parentSize = frame.Parent.AbsoluteSize
+            local frameSize = frame.AbsoluteSize
+            local newX = math.clamp(startPos.X + delta.X, 0, parentSize.X - frameSize.X)
+            local newY = math.clamp(startPos.Y + delta.Y, 0, parentSize.Y - frameSize.Y)
+            frame.Position = UDim2.new(0, newX, 0, newY)
         end
     end)
 end
 
-local Library = {}
-Library.__index = Library
+local BartLib = {}
+BartLib.__index = BartLib
 
--- Create a single screengui container (one per library invocation)
-local function makeScreenGui()
-    local sg = Instance.new("ScreenGui")
-    sg.Name = "BartLib_" .. tostring(math.random(1000, 9999))
-    sg.ResetOnSpawn = false
-    sg.IgnoreGuiInset = true
-    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    sg.Parent = playerGui
-    return sg
-end
+function BartLib:CreateWindow(title)
+    local self = {}
+    self._folders = {}
+    self._minimized = false
 
--- Constructor: return a library table (factory)
-local function newLibrary()
-    local self = setmetatable({}, Library)
-    self._screenGui = makeScreenGui()
-    return self
-end
+    local SCREEN = new("ScreenGui", { Name = "bartlib_install_"..tostring(math.random(1000,9999)), ResetOnSpawn = false, IgnoreGuiInset = true, Parent = playerGui })
 
--- Create a new window/frame
-function Library:CreateWindow(title)
-    local screen = self._screenGui
+    local WIDTH = 420
+    local HEADER_H = 34
+    local TAB_H = 36
+    local MAX_H = 360
 
-    -- Make window smaller so multiple windows fit
-    local INITIAL_SIZE = UDim2.new(0, 320, 0, 300)
-    local HEADER_HEIGHT = 32
-
-    local window = new("Frame", {
+    local win = new("Frame", {
+        Parent = SCREEN,
         Name = "Window",
-        Parent = screen,
-        Size = INITIAL_SIZE,
-        Position = UDim2.new(0.5, -160, 0.5, -150),
-        BackgroundColor3 = theme.Background,
+        Size = UDim2.new(0, WIDTH, 0, HEADER_H),
+        Position = UDim2.new(0.5, -WIDTH/2, 0, 12),
+        BackgroundColor3 = theme.Bg,
         BorderSizePixel = 0,
+        ClipsDescendants = true,
         Active = true,
-        ClipsDescendants = true, -- ensure content doesn't overflow when minimized
     })
-    -- rounded corners
-    local windowCorner = new("UICorner", { Parent = window, CornerRadius = UDim.new(0, 8) })
-    local outline = new("Frame", {
-        Name = "Outline",
-        Parent = window,
-        Size = UDim2.new(1, 2, 1, 2),
-        Position = UDim2.new(0, -1, 0, -1),
-        BackgroundColor3 = theme.Outline,
-        BorderSizePixel = 0,
-        ZIndex = 0,
-    })
-    new("UICorner", { Parent = outline, CornerRadius = UDim.new(0, 8) }) -- round outline too
+    new("UICorner", { Parent = win, CornerRadius = UDim.new(0,8) })
+    new("Frame", { Parent = win, Size = UDim2.new(1,2,1,2), Position = UDim2.new(0,-1,0,-1), BackgroundColor3 = theme.Outline, BorderSizePixel = 0, ZIndex = 0 })
 
-    local header = new("Frame", {
-        Name = "Header",
-        Parent = window,
-        Size = UDim2.new(1, 0, 0, HEADER_HEIGHT),
-        BackgroundColor3 = theme.WindowAccent,
-        BorderSizePixel = 0,
-        ZIndex = 2,
-    })
-    local headerCorner = new("UICorner", { Parent = header, CornerRadius = UDim.new(0, 8) })
-    local titleLabel = new("TextLabel", {
-        Name = "Title",
-        Parent = header,
-        Size = UDim2.new(1, -40, 1, 0),
-        Position = UDim2.new(0, 10, 0, 0),
-        BackgroundTransparency = 1,
-        Text = tostring(title or "Window"),
-        TextColor3 = theme.Text,
-        Font = Enum.Font.GothamBold,
-        TextSize = 14,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    })
-    -- minimize button (header-only toggle)
-    local closeBtn = new("TextButton", {
-        Name = "Minimize",
-        Parent = header,
-        Size = UDim2.new(0, 28, 0, 20),
-        Position = UDim2.new(1, -36, 0.5, -10),
-        BackgroundTransparency = 0,
-        BackgroundColor3 = Color3.fromRGB(35, 20, 40),
-        Text = "—",
-        TextColor3 = theme.Text,
-        Font = Enum.Font.GothamBold,
-        TextSize = 16,
-        AutoButtonColor = false,
-        ZIndex = 3,
-    })
-    new("UICorner", { Parent = closeBtn, CornerRadius = UDim.new(0, 6) })
+    local header = new("Frame", { Parent = win, Size = UDim2.new(1,0,0,HEADER_H), BackgroundColor3 = theme.Accent, BorderSizePixel = 0 })
+    new("UICorner", { Parent = header, CornerRadius = UDim.new(0,8) })
+    new("TextLabel", { Parent = header, Size = UDim2.new(1, -56, 1, 0), Position = UDim2.new(0, 12, 0, 0), BackgroundTransparency = 1, Text = tostring(title or "Window"), TextColor3 = theme.Text, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left })
+    local miniBtn = new("TextButton", { Parent = header, Size = UDim2.new(0,36,0,22), Position = UDim2.new(1, -44, 0.5, -11), BackgroundColor3 = theme.Tab, Text = "—", TextColor3 = theme.Text, Font = Enum.Font.GothamBold, TextSize = 14, AutoButtonColor = false })
+    new("UICorner", { Parent = miniBtn, CornerRadius = UDim.new(0,6) })
 
-    -- toggle minimize/restore with tween
-    local minimized = false
-    local normalSize = window.Size
-    closeBtn.MouseButton1Click:Connect(function()
-        if not minimized then
-            minimized = true
-            closeBtn.Text = "+"
+    local tabBar = new("Frame", { Parent = win, Name = "TabBar", Position = UDim2.new(0,0,0,HEADER_H), Size = UDim2.new(1,0,0,TAB_H), BackgroundColor3 = theme.Tab, BorderSizePixel = 0, ClipsDescendants = false })
+    new("UICorner", { Parent = tabBar, CornerRadius = UDim.new(0,6) })
+    local tabLayout = new("UIListLayout", { Parent = tabBar, FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Left, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0,8), SortOrder = Enum.SortOrder.LayoutOrder })
+    new("UIPadding", { Parent = tabBar, PaddingLeft = UDim.new(0,8), PaddingRight = UDim.new(0,8) })
+
+    local content = new("Frame", { Parent = win, Position = UDim2.new(0,0,0, HEADER_H + TAB_H), Size = UDim2.new(1,0,0,0), BackgroundColor3 = theme.Panel, BorderSizePixel = 0 })
+    local contentLayout = new("UIListLayout", { Parent = content, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0,6) })
+    new("UIPadding", { Parent = content, PaddingLeft = UDim.new(0,8), PaddingTop = UDim.new(0,8), PaddingRight = UDim.new(0,8) })
+
+    makeDraggable(win, header)
+
+    local function setMinimized(m)
+        self._minimized = m and true or false
+        if self._minimized then
+            miniBtn.Text = "+"
+            win:TweenSize(UDim2.new(0, WIDTH, 0, HEADER_H), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.15, true)
+            tabBar.Visible = false
             content.Visible = false
-            -- animate to header-only height using current absolute width
-            TweenService:Create(window, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                Size = UDim2.new(0, window.AbsoluteSize.X, 0, HEADER_HEIGHT)
-            }):Play()
+            for _,f in ipairs(self._folders) do f.ElementsFrame.Visible = false end
         else
-            minimized = false
-            closeBtn.Text = "—"
+            miniBtn.Text = "—"
+            tabBar.Visible = true
             content.Visible = true
-            TweenService:Create(window, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                Size = normalSize
-            }):Play()
-        end
-    end)
-
-    makeDraggable(window, header)
-
-    local content = new("Frame", {
-        Name = "Content",
-        Parent = window,
-        Size = UDim2.new(1, 0, 1, -HEADER_HEIGHT),
-        Position = UDim2.new(0, 0, 0, HEADER_HEIGHT),
-        BackgroundTransparency = 1,
-    })
-    local folderList = new("ScrollingFrame", {
-        Name = "FolderList",
-        Parent = content,
-        Size = UDim2.new(1, 0, 1, 0),
-        CanvasSize = UDim2.new(0, 0, 0, 0),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        ScrollBarThickness = 6,
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-    })
-    local layout = new("UIListLayout", {
-        Name = "UIListLayout",
-        Parent = folderList,
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 6),
-    })
-    local padding = new("UIPadding", {
-        Name = "Padding",
-        Parent = folderList,
-        PaddingTop = UDim.new(0, 8),
-        PaddingBottom = UDim.new(0, 8),
-        PaddingLeft = UDim.new(0, 8),
-        PaddingRight = UDim.new(0, 8),
-    })
-
-    local win = {}
-    win._root = window
-    win._folders = {}
-
-    function win:CreateFolder(name)
-        local folderFrame = new("Frame", {
-            Name = tostring(name),
-            Parent = folderList,
-            Size = UDim2.new(1, 0, 0, 30),
-            BackgroundColor3 = theme.FolderHeader,
-            BorderSizePixel = 0,
-        })
-        -- folder rounded
-        new("UICorner", { Parent = folderFrame, CornerRadius = UDim.new(0, 6) })
-        local header = new("Frame", {
-            Name = "FolderHeader",
-            Parent = folderFrame,
-            Size = UDim2.new(1, 0, 0, 30),
-            BackgroundTransparency = 1,
-        })
-        local lbl = new("TextLabel", {
-            Name = "Label",
-            Parent = header,
-            Size = UDim2.new(1, -24, 1, 0),
-            Position = UDim2.new(0, 8, 0, 0),
-            Text = tostring(name),
-            TextColor3 = theme.Text,
-            BackgroundTransparency = 1,
-            Font = Enum.Font.GothamBold,
-            TextSize = 13,
-            TextXAlignment = Enum.TextXAlignment.Left,
-        })
-        local toggleBtn = new("TextButton", {
-            Name = "Toggle",
-            Parent = header,
-            Size = UDim2.new(0, 18, 0, 18),
-            Position = UDim2.new(1, -22, 0.5, -9),
-            Text = "-",
-            TextColor3 = theme.Text,
-            BackgroundTransparency = 1,
-            Font = Enum.Font.Gotham,
-            TextSize = 14,
-            AutoButtonColor = false,
-        })
-
-        local contentFrame = new("Frame", {
-            Name = "FolderContent",
-            Parent = folderFrame,
-            Size = UDim2.new(1, 0, 0, 0),
-            Position = UDim2.new(0, 0, 0, 30),
-            BackgroundTransparency = 1,
-            ClipsDescendants = false,
-        })
-        local contentList = new("UIListLayout", {
-            Name = "List",
-            Parent = contentFrame,
-            SortOrder = Enum.SortOrder.LayoutOrder,
-            Padding = UDim.new(0, 6),
-        })
-        local contentPad = new("UIPadding", {
-            Name = "Padding",
-            Parent = contentFrame,
-            PaddingLeft = UDim.new(0, 8),
-            PaddingRight = UDim.new(0, 8),
-            PaddingTop = UDim.new(0, 6),
-            PaddingBottom = UDim.new(0, 6),
-        })
-
-        local expanded = true
-        local function setExpanded(val)
-            expanded = val
-            toggleBtn.Text = expanded and "-" or "+"
-            contentFrame.Size = expanded and UDim2.new(1, 0, 0, contentList.AbsoluteContentSize.Y + 8) or UDim2.new(1, 0, 0, 0)
-            folderFrame.Size = UDim2.new(1, 0, 0, 30 + (expanded and (contentList.AbsoluteContentSize.Y + 8) or 0))
-        end
-
-        contentList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-            if expanded then
-                contentFrame.Size = UDim2.new(1, 0, 0, contentList.AbsoluteContentSize.Y + 8)
-                folderFrame.Size = UDim2.new(1, 0, 0, 30 + (contentList.AbsoluteContentSize.Y + 8))
+            local maxContent = 0
+            for _,f in ipairs(self._folders) do
+                local h = (f._uiList and f._uiList.AbsoluteContentSize.Y) or f.ElementsFrame.AbsoluteSize.Y
+                maxContent = math.max(maxContent, h)
             end
-        end)
+            local desired = math.clamp(HEADER_H + TAB_H + maxContent + 16, HEADER_H + TAB_H + 80, MAX_H)
+            win:TweenSize(UDim2.new(0, WIDTH, 0, desired), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.15, true)
+        end
+    end
+    miniBtn.MouseButton1Click:Connect(function() setMinimized(not self._minimized) end)
 
-        toggleBtn.MouseButton1Click:Connect(function()
-            setExpanded(not expanded)
-        end)
+    local function selectFolder(folder)
+        if not folder then return end
+        for _,f in ipairs(self._folders) do
+            f.ElementsFrame.Visible = (f == folder)
+            f.Tab.Button.BackgroundColor3 = (f == folder) and theme.Accent or theme.Tab
+        end
+        if self._minimized then setMinimized(false) end
+        local listY = (folder._uiList and folder._uiList.AbsoluteContentSize.Y) or folder.ElementsFrame.AbsoluteSize.Y
+        local contentH = math.min(MAX_H - (HEADER_H + TAB_H), listY)
+        local desired = HEADER_H + TAB_H + math.max(60, contentH) + 16
+        win:TweenSize(UDim2.new(0, WIDTH, 0, desired), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.15, true)
+    end
 
-        local folder = {
-            _root = folderFrame,
-            _content = contentFrame,
-            _items = {},
-        }
+    function self:CreateFolder(name)
+        local folder = { Name = name, Elements = {}, Opened = false }
+        local idx = #self._folders + 1
 
-        -- Toggle: name, callback(value), [default = false]
-        function folder:Toggle(name, callback, default)
-            local item = new("Frame", {
-                Name = tostring(name),
-                Parent = contentFrame,
-                Size = UDim2.new(1, 0, 0, 28),
-                BackgroundTransparency = 1,
-            })
-            local txt = new("TextLabel", {
-                Name = "Text",
-                Parent = item,
-                Size = UDim2.new(1, -34, 1, 0),
-                Position = UDim2.new(0, 8, 0, 0),
-                Text = tostring(name),
-                TextColor3 = theme.Subtext,
-                BackgroundTransparency = 1,
-                Font = Enum.Font.Gotham,
-                TextSize = 13,
-                TextXAlignment = Enum.TextXAlignment.Left,
-            })
-            local box = new("Frame", {
-                Name = "Box",
-                Parent = item,
-                Size = UDim2.new(0, 20, 0, 20),
-                Position = UDim2.new(1, -28, 0.5, -10),
-                BackgroundColor3 = Color3.fromRGB(40, 40, 46),
-                BorderSizePixel = 0,
-                AnchorPoint = Vector2.new(0, 0),
-            })
-            new("UICorner", { Parent = box, CornerRadius = UDim.new(0, 4) })
-            local tick = new("Frame", {
-                Name = "Tick",
-                Parent = box,
-                Size = UDim2.new(1, -6, 1, -6),
-                Position = UDim2.new(0, 3, 0, 3),
-                BackgroundColor3 = theme.Checked,
-                Visible = false,
-                BorderSizePixel = 0,
-            })
-            new("UICorner", { Parent = tick, CornerRadius = UDim.new(0, 3) })
-            local btn = new("TextButton", {
-                Name = "Btn",
-                Parent = item,
-                Size = UDim2.new(1, 0, 1, 0),
-                BackgroundTransparency = 1,
-                AutoButtonColor = false,
-                Text = "",
-            })
+        local tabBtn = new("TextButton", { Parent = tabBar, Name = "Tab_"..idx, BackgroundColor3 = theme.Tab, AutoButtonColor = false, Text = name or ("Tab"..idx), TextColor3 = theme.Text, Font = Enum.Font.GothamBold, TextSize = 13, Size = UDim2.new(0,0,0,28), AutomaticSize = Enum.AutomaticSize.X, LayoutOrder = idx })
+        new("UICorner", { Parent = tabBtn, CornerRadius = UDim.new(0,6) })
+        new("UIPadding", { Parent = tabBtn, PaddingLeft = UDim.new(0,12), PaddingRight = UDim.new(0,12) })
+        tabBtn.MouseButton1Click:Connect(function() selectFolder(folder) end)
 
+        local elems = new("Frame", { Parent = content, Size = UDim2.new(1,0,0,0), BackgroundTransparency = 1, Visible = false, LayoutOrder = idx })
+        local uiList = new("UIListLayout", { Parent = elems, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0,6) })
+        new("UIPadding", { Parent = elems, PaddingLeft = UDim.new(0,6), PaddingTop = UDim.new(0,6), PaddingBottom = UDim.new(0,6) })
+        -- can't attach arbitrary fields to Instances; keep layout ref on the Lua folder table
+        folder._uiList = uiList
+        uiList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() elems.Size = UDim2.new(1,0,0, uiList.AbsoluteContentSize.Y) end)
+
+        local function AddToggle(label, callback, default)
+            local item = new("Frame", { Parent = elems, Size = UDim2.new(1,0,0,28), BackgroundTransparency = 1 })
+            new("TextLabel", { Parent = item, Size = UDim2.new(0.75, -8, 1, 0), Position = UDim2.new(0,8,0,0), BackgroundTransparency = 1, Text = label, TextColor3 = theme.Sub, Font = Enum.Font.SourceSans, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left })
+            local box = new("Frame", { Parent = item, Size = UDim2.new(0,20,0,20), Position = UDim2.new(1, -28, 0.5, -10), BackgroundColor3 = Color3.fromRGB(50,50,50), BorderSizePixel = 0 })
+            new("UICorner", { Parent = box, CornerRadius = UDim.new(0,4) })
+            local tick = new("Frame", { Parent = box, Size = UDim2.new(1, -6, 1, -6), Position = UDim2.new(0,3,0,3), BackgroundColor3 = theme.Checked, Visible = default and true or false, BorderSizePixel = 0 })
+            new("UICorner", { Parent = tick, CornerRadius = UDim.new(0,3) })
+            local btn = new("TextButton", { Parent = item, BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), Text = "", AutoButtonColor = false })
             local state = default and true or false
-            tick.Visible = state
-
-            local function setState(v)
-                state = v and true or false
-                tick.Visible = state
-                -- simple feedback animation
-                TweenService:Create(box, TweenInfo.new(0.12), {BackgroundColor3 = state and Color3.fromRGB(46, 46, 46) or Color3.fromRGB(60, 60, 60)}):Play()
-                -- call provided callback safely
-                if typeof(callback) == "function" then
-                    local ok, err = pcall(callback, state)
-                    if not ok then
-                        warn("BartLib callback error:", err)
-                    end
-                end
-            end
-
-            btn.MouseButton1Click:Connect(function()
-                setState(not state)
-            end)
-
-            -- store and return control
-            folder._items[name] = {
-                _set = setState,
-                _state = function() return state end,
-            }
-            return {
-                Set = function(_, v) setState(tonumber(v) == 1 or v == true) end,
-                Get = function() return state end,
-            }
+            local function set(v) state = not not v; tick.Visible = state; pcall(function() if type(callback) == "function" then callback(state) end end) end
+            btn.MouseButton1Click:Connect(function() set(not state) end)
+            table.insert(folder.Elements, { Type = "Toggle", Set = set, Get = function() return state end })
+            return { Set = set, Get = function() return state end }
         end
 
-        win._folders[name] = folder
+        local function AddButton(label, cb)
+            local b = new("TextButton", { Parent = elems, Size = UDim2.new(1,0,0,28), BackgroundColor3 = theme.Button, Text = label, TextColor3 = theme.Text, Font = Enum.Font.GothamBold, TextSize = 14, AutoButtonColor = false })
+            b.TextXAlignment = Enum.TextXAlignment.Left
+            new("UICorner", { Parent = b, CornerRadius = UDim.new(0,6) })
+            new("UIPadding", { Parent = b, PaddingLeft = UDim.new(0,8) })
+            b.MouseButton1Click:Connect(function() pcall(cb) end)
+            table.insert(folder.Elements, { Type = "Button", Btn = b })
+            return b
+        end
+
+        local function AddSlider(label, opts, cb)
+            local min = opts and opts.min or 0
+            local max = opts and opts.max or 100
+            local precise = opts and opts.precise
+            local f = new("Frame", { Parent = elems, Size = UDim2.new(1,0,0,36), BackgroundTransparency = 1 })
+            new("TextLabel", { Parent = f, Size = UDim2.new(0.55,0,0,18), Position = UDim2.new(0,8,0,4), BackgroundTransparency = 1, Text = label, TextColor3 = theme.Sub, Font = Enum.Font.SourceSans, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left })
+            local valLbl = new("TextLabel", { Parent = f, Size = UDim2.new(0.3,0,0,18), Position = UDim2.new(1,-120,0,4), BackgroundTransparency = 1, Text = tostring(min), TextColor3 = theme.Text, Font = Enum.Font.SourceSans, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Right })
+            local track = new("Frame", { Parent = f, Size = UDim2.new(1,-140,0,10), Position = UDim2.new(0,8,0,20), BackgroundColor3 = Color3.fromRGB(60,60,60) })
+            new("UICorner", { Parent = track, CornerRadius = UDim.new(0,4) })
+            local fill = new("Frame", { Parent = track, Size = UDim2.new(0,0,1,0), BackgroundColor3 = theme.Slider })
+            new("UICorner", { Parent = fill, CornerRadius = UDim.new(0,4) })
+            local dragging = false
+            local value = min
+            local function setFromX(x)
+                local rel = math.clamp((x - track.AbsolutePosition.X)/track.AbsoluteSize.X, 0, 1)
+                value = (min + (max-min)*rel)
+                if not precise then value = math.floor(value + 0.5) end
+                fill.Size = UDim2.new(rel,0,1,0)
+                valLbl.Text = tostring(value)
+                if cb then pcall(cb, value) end
+            end
+            track.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true; setFromX(i.Position.X) end end)
+            track.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end end)
+            UserInputService.InputChanged:Connect(function(i) if dragging and i.UserInputType==Enum.UserInputType.MouseMovement then setFromX(i.Position.X) end end)
+            table.insert(folder.Elements, { Type = "Slider", Frame = f })
+            return f
+        end
+
+        local function AddDropdown(label, options, multi, cb)
+            local container = new("Frame", { Parent = elems, Size = UDim2.new(1,0,0,30), BackgroundTransparency = 1 })
+            local main = new("TextButton", { Parent = container, Size = UDim2.new(1,0,0,30), BackgroundColor3 = theme.Button, Text = label, TextColor3 = theme.Text, AutoButtonColor = false })
+            main.TextXAlignment = Enum.TextXAlignment.Left
+            new("UICorner", { Parent = main, CornerRadius = UDim.new(0,6) })
+            new("UIPadding", { Parent = main, PaddingLeft = UDim.new(0,8) })
+            local list = new("Frame", { Parent = elems, Size = UDim2.new(1,0,0,0), BackgroundTransparency = 1, Visible = false })
+            local listLayout = new("UIListLayout", { Parent = list, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0,4) })
+            new("UIPadding", { Parent = list, PaddingLeft = UDim.new(0,8), PaddingTop = UDim.new(0,4), PaddingBottom = UDim.new(0,4) })
+            listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() list.Size = UDim2.new(1,0,0, listLayout.AbsoluteContentSize.Y) end)
+            main.MouseButton1Click:Connect(function()
+                list.Visible = not list.Visible
+                if list.Visible and self._minimized then setMinimized(false) end
+            end)
+            for _,opt in ipairs(options or {}) do
+                local o = new("TextButton", { Parent = list, Size = UDim2.new(1,0,0,26), BackgroundColor3 = theme.Button, Text = opt, TextColor3 = theme.Text, AutoButtonColor = false })
+                o.TextXAlignment = Enum.TextXAlignment.Left
+                new("UICorner", { Parent = o, CornerRadius = UDim.new(0,6) })
+                new("UIPadding", { Parent = o, PaddingLeft = UDim.new(0,8) })
+                o.MouseButton1Click:Connect(function()
+                    main.Text = tostring(opt)
+                    list.Visible = false
+                    if cb then pcall(cb, opt) end
+                end)
+            end
+            table.insert(folder.Elements, { Type = "Dropdown", Frame = container })
+            return container
+        end
+
+        local function AddBind(label, keyDefault, cb)
+            local f = new("Frame", { Parent = elems, Size = UDim2.new(1,0,0,28), BackgroundTransparency = 1 })
+            new("TextLabel", { Parent = f, Size = UDim2.new(0.65,0,1,0), BackgroundTransparency = 1, Text = label, TextColor3 = theme.Sub, Font = Enum.Font.SourceSans, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, Position = UDim2.new(0,8,0,0) })
+            local kb = new("TextButton", { Parent = f, Size = UDim2.new(0,80,0,20), Position = UDim2.new(1,-88,0.5,-10), BackgroundColor3 = theme.Button, Text = (keyDefault and tostring(keyDefault):gsub("Enum.KeyCode.","") or "None"), AutoButtonColor = false })
+            new("UICorner", { Parent = kb, CornerRadius = UDim.new(0,6) })
+            kb.MouseButton1Click:Connect(function()
+                kb.Text = "Press..."
+                local conn
+                conn = UserInputService.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.Keyboard then
+                        kb.Text = tostring(input.KeyCode):gsub("Enum.KeyCode.","")
+                        if cb then pcall(cb, input.KeyCode) end
+                        conn:Disconnect()
+                    end
+                end)
+            end)
+            table.insert(folder.Elements, { Type = "Bind", Frame = f })
+            return f
+        end
+
+        local function AddBox(label, typ, cb)
+            local b = new("TextBox", { Parent = elems, Size = UDim2.new(1,0,0,28), BackgroundColor3 = theme.Button, Text = (type(label)=="string" and label or ""), TextColor3 = theme.Text, Font = Enum.Font.SourceSans, TextSize = 14 })
+            new("UICorner", { Parent = b, CornerRadius = UDim.new(0,6) })
+            b.FocusLost:Connect(function(enter)
+                if enter and cb then pcall(cb, b.Text) end
+            end)
+            table.insert(folder.Elements, { Type = "Box", Box = b })
+            return b
+        end
+
+        -- public API supports colon and dot call styles
+        folder.Tab = { Button = tabBtn }
+        folder.ElementsFrame = elems
+        folder.Toggle = function(_, ...) return AddToggle(...) end
+        folder.Button = function(_, ...) return AddButton(...) end
+        folder.Slider = function(_, ...) return AddSlider(...) end
+        folder.Dropdown = function(_, ...) return AddDropdown(...) end
+        folder.Bind = function(_, ...) return AddBind(...) end
+        folder.Box = function(_, ...) return AddBox(...) end
+        folder.Open = function() selectFolder(folder) end
+        folder.Close = function() elems.Visible = false end
+
+        table.insert(self._folders, folder)
+        if #self._folders == 1 then selectFolder(folder) end
         return folder
     end
 
-    return win
+    function self:ToggleUI() setMinimized(not self._minimized) end
+    function self:DestroyGui() if SCREEN then SCREEN:Destroy() end end
+
+    return setmetatable(self, { __index = bartlibb })
 end
 
--- Return a callable library instance
-local function create()
-    return newLibrary()
-end
+return setmetatable({}, { __call = function() return bartlibb end })
 
-return create()
