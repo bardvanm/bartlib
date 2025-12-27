@@ -5,6 +5,39 @@ local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+-- Global registry for BartLib windows (by title)
+local BartLibRegistry = getgenv().BartLibRegistry or {}
+getgenv().BartLibRegistry = BartLibRegistry
+
+local function destroyExistingByTitle(title)
+    local tstr = tostring(title or "Window")
+    -- If we previously registered a window for this title, destroy it via API
+    local reg = BartLibRegistry[tstr]
+    if reg and type(reg.DestroyGui) == "function" then
+        pcall(function() reg:DestroyGui() end)
+        BartLibRegistry[tstr] = nil
+    end
+    -- Fallback: scan PlayerGui for ScreenGuis with matching title label or attribute
+    for _, gui in ipairs(playerGui:GetChildren()) do
+        if gui:IsA("ScreenGui") then
+            local match = false
+            if gui:GetAttribute("BartLib") then
+                local attrTitle = gui:GetAttribute("Title")
+                if tostring(attrTitle) == tstr then match = true end
+            end
+            if not match then
+                for _, d in ipairs(gui:GetDescendants()) do
+                    if d:IsA("TextLabel") and tostring(d.Text) == tstr then
+                        match = true
+                        break
+                    end
+                end
+            end
+            if match then pcall(function() gui:Destroy() end) end
+        end
+    end
+end
+
 local theme = {
     Bg = Color3.fromRGB(20,20,22),
     Accent = Color3.fromRGB(45,45,48),
@@ -75,8 +108,14 @@ function BartLib:CreateWindow(title)
     local self = {}
     self._folders = {}
     self._minimized = false
+    local TITLE = tostring(title or "Window")
+
+    -- Ensure single instance per title by cleaning up prior instances
+    destroyExistingByTitle(TITLE)
 
     local SCREEN = new("ScreenGui", { Name = "bartlib_install_"..tostring(math.random(1000,9999)), ResetOnSpawn = false, IgnoreGuiInset = true, Parent = playerGui })
+    SCREEN:SetAttribute("BartLib", true)
+    SCREEN:SetAttribute("Title", TITLE)
 
     local WIDTH = 420
     local HEADER_H = 34
@@ -99,7 +138,7 @@ function BartLib:CreateWindow(title)
 
     local header = new("Frame", { Parent = win, Size = UDim2.new(1,0,0,HEADER_H), BackgroundColor3 = theme.Accent, BorderSizePixel = 0 })
     new("UICorner", { Parent = header, CornerRadius = UDim.new(0,8) })
-    new("TextLabel", { Parent = header, Size = UDim2.new(1, -56, 1, 0), Position = UDim2.new(0, 12, 0, 0), BackgroundTransparency = 1, Text = tostring(title or "Window"), TextColor3 = theme.Text, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left })
+    new("TextLabel", { Parent = header, Size = UDim2.new(1, -56, 1, 0), Position = UDim2.new(0, 12, 0, 0), BackgroundTransparency = 1, Text = TITLE, TextColor3 = theme.Text, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left })
     local miniBtn = new("TextButton", { Parent = header, Size = UDim2.new(0,36,0,22), Position = UDim2.new(1, -44, 0.5, -11), BackgroundColor3 = theme.Tab, Text = "—", TextColor3 = theme.Text, Font = Enum.Font.GothamBold, TextSize = 14, AutoButtonColor = false })
     new("UICorner", { Parent = miniBtn, CornerRadius = UDim.new(0,6) })
 
@@ -336,7 +375,13 @@ function BartLib:CreateWindow(title)
     end
 
     function self:ToggleUI() setMinimized(not self._minimized) end
-    function self:DestroyGui() if SCREEN then SCREEN:Destroy() end end
+    function self:DestroyGui()
+        if SCREEN then SCREEN:Destroy() end
+        BartLibRegistry[TITLE] = nil
+    end
+
+    -- register this window instance under its title for future reinjections
+    BartLibRegistry[TITLE] = self
 
     return setmetatable(self, { __index = BartLib })
 end
